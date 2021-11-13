@@ -8,7 +8,7 @@ The dataset of CVPR 2022 submission (Paper ID 1820).
 
 
 ## Dataset
-The dataset contains the following files:
+The dataset is available [here](https://drive.google.com/drive/folders/1yvXxQAbkU8x82lB618jiPEQQQ8sD_QG3?usp=sharing), it contains the following files:
 	
 * **wikiHow_data.json**: json file of all 20,028 problems with their corresponding WikiHow data
 
