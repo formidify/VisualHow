@@ -3,7 +3,7 @@
 The dataset of CVPR 2022 submission (Paper ID 1820).
 
 <p float="left">
-  <img src="" width="400" />
+  <img src="fig1.pdf" width="400" />
 </p>
 
 
