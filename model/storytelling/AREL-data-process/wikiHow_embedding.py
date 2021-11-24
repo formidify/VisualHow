@@ -29,6 +29,6 @@ with open("story_line.json") as f:
     whole_task = json.load(f, object_pairs_hook=OrderedDict)
 
 emb_dim = 300
-glove_file = '/media/xianyu/ICCV_2021/vqa_data/vqa2/glove/glove.6B.%dd.txt' % emb_dim
+glove_file = '/media/ICCV_2021/vqa_data/vqa2/glove/glove.6B.%dd.txt' % emb_dim
 weights, word2emb = create_glove_embedding_init(whole_task["id2words"], glove_file)
 np.save('embedding.npy', weights)

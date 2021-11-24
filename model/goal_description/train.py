@@ -310,19 +310,3 @@ def count_params(model):
 
 if __name__ == '__main__':
     main()
-    # --data_path / media / xianyu / CVPR_2022 / data / wikihow - -data_name
-    # wikihow - -logger_name
-    # runs / debug_wikihow_wsl_grid_bert_baseline / log - -model_name
-    # runs / debug_wikihow_wsl_grid_bert_baseline - -num_epochs = 25 - -lr_update = 15 - -batch_size = 6 - -learning_rate = 5e-4 - -precomp_enc_type
-    # backbone - -workers
-    # 8 - -backbone_source
-    # wsl - -vse_mean_warmup_epochs
-    # 1 - -backbone_warmup_epochs
-    # 0 - -embedding_warmup_epochs
-    # 1 - -optim
-    # adam - -backbone_lr_factor
-    # 0.01 - -log_step
-    # 20 - -input_scale_factor
-    # 1.0 - -backbone_path / media / xianyu / CVPR_2022 / data / weights / original_updown_backbone.pth - -embedding_size
-    # 300 - -aggregate_mode
-    # avg

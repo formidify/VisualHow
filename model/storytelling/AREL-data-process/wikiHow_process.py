@@ -71,7 +71,7 @@ def transform_sentence(sent, with_full_stop=True):
     #     exception_list.setdefault(task_id, []).append(sent)
     return sent
 
-info_file = "/media/xianyu/CVPR_2022/data/wikihow/final_result_w_split_20028_raw.json"
+info_file = "/media/CVPR_2022/data/wikihow/final_result_w_split_20028_raw.json"
 data_info = json.load(open(info_file), object_pairs_hook=OrderedDict)
 whole_task2im = {"train": {}, "val": {}, "test": {}}
 

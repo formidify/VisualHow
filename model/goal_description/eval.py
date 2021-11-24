@@ -12,7 +12,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', default='wikihow',
                         help='coco or f30k')
-    parser.add_argument('--data_path', default='/home/xianyu/CVPR_2022/data/wikihow')
+    parser.add_argument('--data_path', default='/home/CVPR_2022/data/wikihow')
     parser.add_argument('--save_results', action='store_true')
     parser.add_argument('--evaluate_cxc', action='store_true')
     opt = parser.parse_args()
