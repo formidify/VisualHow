@@ -1,6 +1,4 @@
-# Visual How
-
-The dataset of CVPR 2022 submission (Paper ID 1820).
+# VisualHow: Multimodal Problem Solving
 
 <p float="left">
   <img src="Fig1.png" width="400" />
