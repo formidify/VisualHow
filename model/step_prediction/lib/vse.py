@@ -9,7 +9,7 @@ from torch.nn.utils import clip_grad_norm_
 from allennlp.data import Vocabulary
 
 from lib.encoders import get_image_encoder, get_text_encoder, get_rnn_encoder, get_captioner, get_multimodal_encoder
-from lib.loss import ContrastiveLoss
+from lib.loss import ContrastiveLoss, WHContrastiveLoss, ContrastiveLoss3D, ContrastiveLoss3DTo2D
 from lib.att_loss import attention_loss, attention_loss_bce
 
 import logging
@@ -49,6 +49,15 @@ class VSEModel(object):
         self.criterion = ContrastiveLoss(opt=opt,
                                          margin=opt.margin,
                                          max_violation=opt.max_violation)
+        # self.criterion = WHContrastiveLoss(opt=opt,
+        #                                  margin=opt.margin,
+        #                                  max_violation=opt.max_violation)
+        # self.criterion = ContrastiveLoss3D(opt=opt,
+        #                                    margin=opt.margin,
+        #                                    max_violation=opt.max_violation)
+        self.criterion3DTo2D = ContrastiveLoss3DTo2D(opt=opt,
+                                                     margin=opt.margin,
+                                                     max_violation=opt.max_violation)
 
         params = list(self.cap_enc.parameters())
         params += list(self.img_enc.parameters())
@@ -122,13 +131,19 @@ class VSEModel(object):
     def set_max_violation(self, max_violation):
         if max_violation:
             self.criterion.max_violation_on()
+            self.criterion3DTo2D.max_violation_on()
         else:
             self.criterion.max_violation_off()
+            self.criterion3DTo2D.max_violation_off()
 
     def state_dict(self):
         state_dict = [self.img_enc.state_dict(), self.cap_enc.state_dict(),
                       self.goal_enc.state_dict(), self.rnn_enc.state_dict(),
                       self.multimodal_enc.state_dict()]
+        return state_dict
+
+    def optimizer_state_dict(self):
+        state_dict = self.optimizer.state_dict()
         return state_dict
 
     def load_state_dict(self, state_dict):
@@ -137,6 +152,44 @@ class VSEModel(object):
         self.goal_enc.load_state_dict(state_dict[2], strict=False)
         self.rnn_enc.load_state_dict(state_dict[3], strict=False)
         self.multimodal_enc.load_state_dict(state_dict[4], strict=False)
+
+    def load_optimizer_state_dict(self, state_dict):
+        self.optimizer.load_state_dict(state_dict)
+
+    def shuffle(self, base_features):
+        feature_index = np.zeros((base_features.shape[0], 64))
+        if self.img_enc.training:
+            # Size Augmentation during training, randomly drop grids
+            base_length = base_features.size(1)
+            features = []
+            feat_lengths = []
+            rand_list_1 = np.random.rand(base_features.size(0), base_features.size(1))
+            rand_list_2 = np.random.rand(base_features.size(0))
+            for i in range(base_features.size(0)):
+                if rand_list_2[i] > 0.2:
+                    feat_i = base_features[i][np.where(rand_list_1[i] > 0.20 * rand_list_2[i])]
+                    selected_index = np.array(np.where(rand_list_1[i] > 0.20 * rand_list_2[i]))
+                    feature_index[i, :selected_index.shape[1]] = selected_index.squeeze()
+                    no_selected_index = np.array(np.where(rand_list_1[i] <= 0.20 * rand_list_2[i]))
+                    feature_index[i, selected_index.shape[1]:] = no_selected_index.squeeze()
+                    len_i = len(feat_i)
+                    pads_i = torch.zeros(base_length - len_i, base_features.size(-1)).to(base_features.device)
+                    feat_i = torch.cat([feat_i, pads_i], dim=0)
+                else:
+                    feat_i = base_features[i]
+                    len_i = base_length
+                    feature_index[i] = np.arange(len_i)
+                feat_lengths.append(len_i)
+                features.append(feat_i)
+            base_features = torch.stack(features, dim=0)
+            # base_features = base_features[:, :max(feat_lengths), :]
+            feat_lengths = torch.tensor(feat_lengths).to(base_features.device)
+        else:
+            feat_lengths = torch.zeros(base_features.size(0)).to(base_features.device)
+            feat_lengths[:] = base_features.size(1)
+            feature_index[:] = np.arange(base_features.size(1))
+
+        return base_features, feat_lengths, feature_index
 
     def train_start(self):
         """switch to train mode
@@ -200,7 +253,9 @@ class VSEModel(object):
                 captions = captions.cuda()
                 goal_targets = goal_targets.cuda()
 
-            base_features, feat_lengths, feature_index = self.img_enc(images)
+            # base_features, feat_lengths, feature_index = self.img_enc(images)
+            base_features = self.img_enc(images)
+            base_features, feat_lengths, feature_index = self.shuffle(base_features)
 
 
         cap_lengths = torch.Tensor(cap_lengths).cuda()
@@ -209,15 +264,17 @@ class VSEModel(object):
         goal_lengths = torch.Tensor(goal_lengths).cuda()
         goal_emb = self.goal_enc(goal_targets, goal_lengths)
 
-        image_pooled_features, image_pool_weights, cap_pooled_features, cap_pool_weights, \
-        goal_pooled_features, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks = \
-            self.multimodal_enc(base_features, feat_lengths, feature_index,
-                            cap_emb, cap_lengths,
-                            goal_emb, goal_lengths)
+        # image_pooled_features, image_pool_weights, cap_pooled_features, cap_pool_weights, \
+        # goal_pooled_features, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks = \
+        #     self.multimodal_enc(base_features, feat_lengths, feature_index,
+        #                     cap_emb, cap_lengths,
+        #                     goal_emb, goal_lengths)
 
 
-        return image_pooled_features, image_pool_weights, cap_pooled_features, cap_pool_weights, \
-               goal_pooled_features, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks
+        # return image_pooled_features, image_pool_weights, cap_pooled_features, cap_pool_weights, \
+        #        goal_pooled_features, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks
+
+        return base_features, feat_lengths, feature_index, cap_emb, goal_emb
 
     def forward_loss(self, rnn_out, next_img_emb, next_cap_emb):
         """Compute the loss given pairs of image and caption embeddings
@@ -225,10 +282,33 @@ class VSEModel(object):
         img_loss = self.criterion(rnn_out, next_img_emb)
         cap_loss = self.criterion(rnn_out, next_cap_emb)
         loss = img_loss + cap_loss
+        self.logger.update('Le_img_ori', img_loss.data.item(), rnn_out.size(0))
+        self.logger.update('Le_cap_ori', cap_loss.data.item(), rnn_out.size(0))
+        self.logger.update('Le_ori', loss.data.item(), rnn_out.size(0))
+        return loss
+
+    def forward_att_loss(self, rnn_out, next_img_emb, next_cap_emb, neg_img_emb_list, neg_cap_emb_list):
+        """Compute the loss given pairs of image and caption embeddings
+        """
+        img_loss = self.criterion(rnn_out, next_img_emb, neg_img_emb_list)
+        cap_loss = self.criterion(rnn_out, next_cap_emb, neg_cap_emb_list)
+        loss = img_loss + cap_loss
         self.logger.update('Le_img', img_loss.data.item(), rnn_out.size(0))
         self.logger.update('Le_cap', cap_loss.data.item(), rnn_out.size(0))
         self.logger.update('Le', loss.data.item(), rnn_out.size(0))
         return loss
+
+    def forward_new_att_loss(self, rnn_out, img_emb, cap_emb):
+        """Compute the loss given pairs of image and caption embeddings
+        """
+        img_loss = self.criterion3DTo2D(rnn_out, img_emb)
+        cap_loss = self.criterion3DTo2D(rnn_out, cap_emb)
+        loss = img_loss + cap_loss
+        self.logger.update('Le_img', img_loss.data.item(), rnn_out.size(0))
+        self.logger.update('Le_cap', cap_loss.data.item(), rnn_out.size(0))
+        self.logger.update('Le', loss.data.item(), rnn_out.size(0))
+        return loss
+
 
     def construct_feat(self, cat_feat, batch_ids):
         if torch.cuda.is_available():
@@ -257,8 +337,7 @@ class VSEModel(object):
         self.logger.update('lr', self.optimizer.param_groups[0]['lr'])
 
         # compute the embeddings
-        img_emb, img_pool_weights, cap_emb, cap_pool_weights, \
-        goal_emb, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks = \
+        base_features, feat_lengths, feature_index, cap_emb, goal_emb = \
             self.forward_emb(images, captions, cap_lengths, goal_targets, goal_lengths, image_lengths=image_lengths)
 
         # cat the feat
@@ -267,18 +346,57 @@ class VSEModel(object):
             batch_ids_tensor = torch.tensor(batch_ids).cuda()
             prediction_ids_tensor = torch.tensor(prediction_ids).cuda()
             image_numbers = torch.tensor(image_numbers).cuda()
+            cap_lengths = torch.tensor(cap_lengths).cuda()
+            goal_lengths = torch.tensor(goal_lengths).cuda()
         else:
             prediction_ids_tensor = torch.tensor(prediction_ids)
             batch_ids_tensor = torch.tensor(batch_ids)
-            prediction_ids_tensor = torch.tensor(prediction_ids).cuda()
+            prediction_ids_tensor = torch.tensor(prediction_ids)
             image_numbers = torch.tensor(image_numbers)
+            cap_lengths = torch.tensor(cap_lengths)
+            goal_lengths = torch.tensor(goal_lengths)
 
-        cat_feat = torch.cat([goal_emb, img_emb, cap_emb], dim=1)
+        image_pooled_features, img_pool_weights, cap_pooled_features, cap_pool_weights, \
+        goal_pooled_features, goal_pool_weights, origin_image_pool_weights, \
+        image_pool_weight_masks, cap_emb_mask, goal_emb_mask = \
+            self.multimodal_enc(base_features, feat_lengths, feature_index,
+                            cap_emb, cap_lengths,
+                            goal_emb, goal_lengths)
+
+        cat_feat = torch.cat([goal_pooled_features, image_pooled_features, cap_pooled_features], dim=1)
         cat_feat = cat_feat[prediction_ids_tensor < 0]
         rnn_out = self.rnn_enc(cat_feat, image_numbers - 1, dependency_type)
 
-        next_img_emb = img_emb[prediction_ids_tensor >= 0]
-        next_cap_emb = cap_emb[prediction_ids_tensor >= 0]
+        # extract curr feature
+        curr_base_features = base_features[prediction_ids_tensor >= 0]
+        curr_feat_lengths = feat_lengths[prediction_ids_tensor >= 0]
+        curr_feature_index = feature_index[np.array(prediction_ids) >= 0]
+        curr_cap_emb = cap_emb[prediction_ids_tensor >= 0]
+        curr_goal_emb = goal_emb[prediction_ids_tensor >= 0]
+        curr_cap_lengths = cap_lengths[prediction_ids_tensor >= 0]
+        curr_goal_lengths = goal_lengths[prediction_ids_tensor >= 0]
+
+        batch_size = rnn_out.shape[0]
+        curr_base_features = curr_base_features.unsqueeze(1).repeat(1, batch_size, 1 , 1).\
+            view(-1, curr_base_features.shape[-2], curr_base_features.shape[-1])
+        curr_feat_lengths = curr_feat_lengths.unsqueeze(1).repeat(1, batch_size).view(-1)
+        curr_feature_index = np.repeat(np.expand_dims(curr_feature_index, axis=1), batch_size, axis=1).\
+            reshape((-1, curr_feature_index.shape[-1]))
+        curr_cap_emb = curr_cap_emb.unsqueeze(1).repeat(1, batch_size, 1, 1).\
+            view(-1, curr_cap_emb.shape[-2], curr_cap_emb.shape[-1])
+        curr_cap_lengths = curr_cap_lengths.unsqueeze(1).repeat(1, batch_size).view(-1)
+        curr_goal_emb = curr_goal_emb.unsqueeze(0).repeat(batch_size, 1, 1, 1).\
+            view(-1, curr_goal_emb.shape[-2], curr_goal_emb.shape[-1])
+        curr_goal_lengths = curr_goal_lengths.unsqueeze(0).repeat(batch_size, 1).view(-1)
+
+        curr_image_pooled_features, _, curr_cap_pooled_features, _, \
+        _, _, _, _, _, _ = \
+            self.multimodal_enc(curr_base_features,
+                                curr_feat_lengths,
+                                curr_feature_index,
+                                curr_cap_emb, curr_cap_lengths,
+                                curr_goal_emb,
+                                curr_goal_lengths)
 
         # measure accuracy and record loss
         self.optimizer.zero_grad()
@@ -291,19 +409,25 @@ class VSEModel(object):
             if self.opt.attention_loss == "ce":
                 # normalize
                 image_map[image_pool_weight_masks.view(-1, 1, 8, 8) == 0] = 0
-                image_map = (image_map + 1e-10) / (image_map + 1e-10).sum(-1, keepdim=True).sum(-2, keepdim=True)
-                caption_map = (caption_map + 1e-10) / (caption_map + 1e-10).sum(-1, keepdim=True)
-                v_att_loss = attention_loss(img_pool_weights, image_map, image_pool_weight_masks)
-                l_att_loss = attention_loss(cap_pool_weights, caption_map)
+                image_map = image_map.view(image_map.shape[0], -1)
+                image_map[image_pool_weight_masks > 0] += 1e-10
+                image_map = image_map / image_map.sum(-1, keepdim=True)
+                caption_map[cap_emb_mask > 0] += 1e-10
+                caption_map = caption_map / caption_map.sum(-1, keepdim=True)
+                v_att_loss = attention_loss(origin_image_pool_weights, image_map, image_pool_weight_masks)
+                l_att_loss = attention_loss(cap_pool_weights, caption_map, cap_emb_mask)
             elif self.opt.attention_loss == "bce":
                 image_map[image_pool_weight_masks.view(-1, 1, 8, 8) == 0] = 0
-                v_att_loss = attention_loss_bce(img_pool_weights, image_map, image_pool_weight_masks)
+                v_att_loss = attention_loss_bce(origin_image_pool_weights, image_map, image_pool_weight_masks)
                 l_att_loss = attention_loss_bce(cap_pool_weights, caption_map)
             att_loss = v_att_loss + l_att_loss
+            self.logger.update('V_Att_loss', v_att_loss.data.item(), image_map.size(0))
+            self.logger.update('L_Att_loss', l_att_loss.data.item(), image_map.size(0))
             self.logger.update('Att_loss', att_loss.data.item(), image_map.size(0))
-            loss = self.forward_loss(rnn_out, next_img_emb, next_cap_emb) + self.opt.attention_loss_weight * att_loss
+            loss = self.forward_new_att_loss(rnn_out, curr_image_pooled_features, curr_cap_pooled_features) \
+                   + self.opt.attention_loss_weight * att_loss
         else:
-            loss = self.forward_loss(rnn_out, next_img_emb, next_cap_emb)
+            loss = self.forward_new_att_loss(rnn_out, curr_image_pooled_features, curr_cap_pooled_features)
 
         if warmup_alpha is not None:
             loss = loss * warmup_alpha

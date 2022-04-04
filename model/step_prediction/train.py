@@ -6,18 +6,17 @@ import torch
 from transformers import BertTokenizer
 from tqdm import tqdm
 
-from lib.datasets import image_caption
+from lib.datasets import image_caption, image_caption_choice
 from lib.vse import VSEModel
-from lib.evaluation import i2t, t2i, g2i, g2t, AverageMeter, LogCollector, encode_data, compute_sim
-from lib.evaluation import i2t_cond_goal, t2i_cond_goal
-from lib.evaluation import single_retrieval
-import evaluation
+from lib.evaluation import AverageMeter, LogCollector, \
+    compute_sim, encode_stepwise_data, encode_previous_gt_stepwise_data
+from scipy.stats import spearmanr,pearsonr
+from visualization.attention_evaluation import cal_cc_score, cal_kld_score, cal_sim_score
 
 import logging
 import tensorboard_logger as tb_logger
 
 import multiprocessing
-from utils.score import caption_scores
 
 import arguments
 import json
@@ -56,6 +55,9 @@ def main():
     train_loader, val_loader = image_caption.get_loaders(
         opt.data_path, opt.data_name, tokenizer, opt.batch_size, opt.workers, opt)
 
+    val_loader = image_caption_choice.get_val_loaders(
+        opt.data_path, opt.data_name, tokenizer, opt.batch_size, opt.workers, opt)
+
     model = VSEModel(opt)
 
     lr_schedules = [opt.lr_update, ]
@@ -71,6 +73,7 @@ def main():
             if not model.is_data_parallel:
                 model.make_data_parallel()
             model.load_state_dict(checkpoint['model'])
+            model.load_optimizer_state_dict(checkpoint['optimizer'])
             # Eiters is used to show logs as the continuation of another training
             model.Eiters = checkpoint['Eiters']
             logger.info("=> loaded checkpoint '{}' (epoch {}, best_rsum {})"
@@ -129,6 +132,7 @@ def main():
         save_checkpoint({
             'epoch': epoch + 1,
             'model': model.state_dict(),
+            'optimizer': model.optimizer_state_dict(),
             'best_rsum': best_rsum,
             'opt': opt,
             'Eiters': model.Eiters,
@@ -170,6 +174,7 @@ def train(opt, train_loader, model, epoch, val_loader):
         else:
             images, image_numbers, cap_targets, cap_lengths, caption_map, image_map, goal_targets, goal_lengths, dependency_type,\
             ids, image_ind, goal_ids, batch_ids, prediction_ids, dataset_idx, mutliple_choice_candidates = train_data
+            # print(images.shape[0])
             if epoch == opt.embedding_warmup_epochs:
                 warmup_alpha = float(i) / num_loader_iter
                 model.train_emb(images, image_numbers, cap_targets, cap_lengths, caption_map, image_map, goal_targets, goal_lengths,
@@ -203,50 +208,37 @@ def train(opt, train_loader, model, epoch, val_loader):
         tb_logger.log_value('data_time', data_time.val, step=model.Eiters)
         model.logger.tb_log(tb_logger, step=model.Eiters)
 
-
 def validate(opt, val_loader, model):
     logger = logging.getLogger(__name__)
     model.val_start()
     with torch.no_grad():
         # compute the encoding for all the validation images and captions
-        all_img_embs, all_cap_embs, all_rnn_embs, all_goal_ids, all_mutliple_choice_candidates, attention, cur_attention \
-            = encode_data(
+        image_scores, caption_scores, attention_maps, all_eval_score \
+            = encode_previous_gt_stepwise_data(
             model, val_loader, opt.log_step, logging.info, backbone=opt.precomp_enc_type == 'backbone')
-
-    goal_ids2_index = {}
-    for index in range(len(all_goal_ids)):
-        goal_ids2_index[all_goal_ids[index]] = index
 
     start = time.time()
 
-    candidate_matrix = np.zeros((all_img_embs.shape[0], len(all_mutliple_choice_candidates[0])))
-
-    for index in range(len(all_goal_ids)):
-        for inner_idx in range(100):
-            candidate_matrix[index, inner_idx] = goal_ids2_index[all_mutliple_choice_candidates[index][inner_idx]]
-    #
-    # candidate_matrix = np.zeros((all_img_embs.shape[0], 50))
-    # for index in range(50):
-    #     candidate_matrix[index] = np.arange(50)
-
-    (ir1, ir5, ir10, imedr, imeanr, imrr) = single_retrieval(all_rnn_embs, all_img_embs, candidate_matrix)
-    (cr1, cr5, cr10, cmedr, cmeanr, cmrr) = single_retrieval(all_rnn_embs, all_cap_embs, candidate_matrix)
-    rsum = ir1 + ir5 + ir10 + cr1 + cr5 + cr10
+    (imrr, ir1, ir3, ir5, imeanr, imedr) = image_scores["all"]
+    (cmrr, cr1, cr3, cr5, cmeanr, cmedr) = caption_scores["all"]
+    rsum = ir1 + ir3 + ir5 + cr1 + cr3 + cr5
+    logger.info(image_scores)
+    logger.info(caption_scores)
 
     end = time.time()
     logger.info("calculate evaluation time: {}".format(end - start))
 
     logging.info("imrr: %.4f," % imrr)
     logging.info("ir1: %.3f," % ir1)
+    logging.info("ir3: %.3f," % ir3)
     logging.info("ir5: %.3f," % ir5)
-    logging.info("ir10: %.3f," % ir10)
     logging.info("imeanr: %.3f," % imeanr)
     logging.info("imedr: %.3f," % imedr)
 
     logging.info("cmrr: %.4f," % cmrr)
     logging.info("cr1: %.3f," % cr1)
+    logging.info("cr3: %.3f," % cr3)
     logging.info("cr5: %.3f," % cr5)
-    logging.info("cr10: %.3f," % cr10)
     logging.info("cmeanr: %.3f," % cmeanr)
     logging.info("cmedr: %.3f," % cmedr)
 
@@ -255,18 +247,17 @@ def validate(opt, val_loader, model):
     currscore = rsum
     logger.info('Current currscore is {}'.format(currscore))
 
-
     # record metrics in tensorboard
     tb_logger.log_value('metrics/ir1', ir1, step=model.Eiters)
+    tb_logger.log_value('metrics/ir3', ir3, step=model.Eiters)
     tb_logger.log_value('metrics/ir5', ir5, step=model.Eiters)
-    tb_logger.log_value('metrics/ir10', ir10, step=model.Eiters)
     tb_logger.log_value('metrics/imedr', imedr, step=model.Eiters)
     tb_logger.log_value('metrics/imeanr', imeanr, step=model.Eiters)
     tb_logger.log_value('metrics/imrr', imrr, step=model.Eiters)
 
     tb_logger.log_value('metrics/cr1', cr1, step=model.Eiters)
+    tb_logger.log_value('metrics/cr3', cr3, step=model.Eiters)
     tb_logger.log_value('metrics/cr5', cr5, step=model.Eiters)
-    tb_logger.log_value('metrics/cr10', cr10, step=model.Eiters)
     tb_logger.log_value('metrics/cmedr', cmedr, step=model.Eiters)
     tb_logger.log_value('metrics/cmeanr', cmeanr, step=model.Eiters)
     tb_logger.log_value('metrics/cmrr', cmrr, step=model.Eiters)
@@ -274,7 +265,6 @@ def validate(opt, val_loader, model):
     tb_logger.log_value('metrics/rsum', rsum, step=model.Eiters)
 
     return currscore
-
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth', prefix=''):
     logger = logging.getLogger(__name__)

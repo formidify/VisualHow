@@ -120,25 +120,6 @@ class EncoderImageAggr(nn.Module):
             # When using pre-extracted region features, add an extra MLP for the embedding transformation
             features = self.mlp(images) + features
 
-
-        # if self.aggregate_mode == "gpo":
-        #     features, pool_weights = self.gpool(features, image_lengths)
-        # if self.aggregate_mode == "att":
-        #     image_features_mask = features.new_ones(features.shape[0], features.shape[1])
-        #     for index in range(image_lengths.shape[0]):
-        #         image_features_mask[index, int(image_lengths[index]):] = 0
-        #     pool_weights = self.att(features, image_features_mask)
-        #     if self.attention_loss == 'bce':
-        #         features = (features * pool_weights.unsqueeze(-1)).sum(1) / image_lengths.unsqueeze(-1)
-        #     elif self.attention_loss == 'ce':
-        #         features = (features * pool_weights.unsqueeze(-1)).sum(1)
-        #     else:
-        #         features = (features * pool_weights.unsqueeze(-1)).sum(1)
-        # if self.aggregate_mode == "avg":
-        #     pool_weights = features.new_zeros(features.shape[0], features.shape[1])
-        #     for index in range(image_lengths.shape[0]):
-        #         pool_weights[index, :int(image_lengths[index])] = 1. / int(image_lengths[index])
-        #     features = (features * pool_weights.unsqueeze(-1)).sum(1)
         image_features_mask = features.new_ones(features.shape[0], features.shape[1])
         for index in range(image_lengths.shape[0]):
             image_features_mask[index, int(image_lengths[index]):] = 0
@@ -167,6 +148,9 @@ class EncoderImageFull(nn.Module):
     def forward(self, images):
         """Extract image feature vectors."""
         base_features = self.backbone(images)
+        return base_features
+
+    def shuffle(self, base_features):
         feature_index = np.zeros((base_features.shape[0], 64))
         if self.training:
             # Size Augmentation during training, randomly drop grids
@@ -199,23 +183,6 @@ class EncoderImageFull(nn.Module):
             feat_lengths[:] = base_features.size(1)
             feature_index[:] = np.arange(base_features.size(1))
 
-        # features, pool_weights = self.image_encoder(base_features, feat_lengths)
-        #
-        # if self.image_encoder.aggregate_mode == "gpo":
-        #     origin_pool_weights = torch.zeros(base_features.shape[0], 8, 8, dtype=torch.float32).to(base_features.device)
-        #     pool_weight_masks = torch.zeros(base_features.shape[0], 8, 8, dtype=torch.float32).to(base_features.device)
-        # else:
-        #     feature_index = feature_index.astype(np.int64)
-        #     origin_pool_weights = torch.zeros(pool_weights.shape[0], pool_weights.shape[1], dtype=torch.float32).to(base_features.device)
-        #     pool_weight_masks = torch.zeros_like(origin_pool_weights)
-        #     for index_1 in range(pool_weights.shape[0]):
-        #         for index_2 in range(pool_weights.shape[1]):
-        #             origin_pool_weights[index_1, feature_index[index_1, index_2]] = pool_weights[index_1, index_2]
-        #             if index_2 < feat_lengths[index_1]:
-        #                 pool_weight_masks[index_1, feature_index[index_1, index_2]] = 1
-        #     origin_pool_weights = origin_pool_weights.view(-1, 8, 8)
-        #     pool_weight_masks = pool_weight_masks.view(-1, 8, 8)
-
         return base_features, feat_lengths, feature_index
 
     def freeze_backbone(self):
@@ -242,10 +209,6 @@ class EncoderText(nn.Module):
 
         self.bert = BertModel.from_pretrained('bert-base-uncased')
         self.linear = nn.Linear(768, embed_size)
-        # if self.aggregate_mode == "gpo":
-        #     self.gpool = GPO(32, 32)
-        # elif self.aggregate_mode == "att":
-        #     self.att = Attention(embed_size, embed_size // 2, self.attention_loss)
 
     def forward(self, x, lengths):
         """Handles variable size captions
@@ -256,30 +219,6 @@ class EncoderText(nn.Module):
         cap_len = lengths
 
         cap_emb = self.linear(bert_emb)
-
-        # if self.aggregate_mode == "gpo":
-        #     pooled_features, pool_weights = self.gpool(cap_emb, cap_len.to(cap_emb.device))
-        # if self.aggregate_mode == "att":
-        #     cap_emb_mask = cap_emb.new_ones(cap_emb.shape[0], cap_emb.shape[1])
-        #     for index in range(cap_len.shape[0]):
-        #         cap_emb_mask[index, int(cap_len[index]):] = 0
-        #     pool_weights = self.att(cap_emb, cap_emb_mask)
-        #     # pooled_features = (cap_emb * pool_weights.unsqueeze(-1)).sum(1)
-        #     if self.attention_loss == 'bce':
-        #         pooled_features = (cap_emb * pool_weights.unsqueeze(-1)).sum(1) / cap_len.unsqueeze(-1)
-        #     elif self.attention_loss == 'ce':
-        #         pooled_features = (cap_emb * pool_weights.unsqueeze(-1)).sum(1)
-        #     else:
-        #         pooled_features = (cap_emb * pool_weights.unsqueeze(-1)).sum(1)
-        # if self.aggregate_mode == "avg":
-        #     pool_weights = cap_emb.new_zeros(cap_emb.shape[0], cap_emb.shape[1])
-        #     for index in range(cap_len.shape[0]):
-        #         pool_weights[index, :int(cap_len[index])] = 1. / int(cap_len[index])
-        #     pooled_features = (cap_emb * pool_weights.unsqueeze(-1)).sum(1)
-        #
-        # # normalization in the joint embedding space
-        # if not self.no_txtnorm:
-        #     pooled_features = l2norm(pooled_features, dim=-1)
 
         return cap_emb
 
@@ -340,7 +279,6 @@ class MultiModalEncoder(nn.Module):
             cap_pooled_features = l2norm(cap_pooled_features, dim=-1)
 
         # goal
-        # pooled_features = (cap_emb * pool_weights.unsqueeze(-1)).sum(1)
         if self.attention_loss == 'bce':
             goal_pooled_features = (goal_emb * goal_pool_weights.unsqueeze(-1)).sum(1) / goal_len.unsqueeze(-1)
         elif self.attention_loss == 'ce':
@@ -363,7 +301,8 @@ class MultiModalEncoder(nn.Module):
         image_pool_weight_masks = pool_weight_masks.view(-1, 64)
 
         return img_emb, image_pool_weights, cap_pooled_features, cap_pool_weights, \
-               goal_pooled_features, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks
+               goal_pooled_features, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks, \
+               cap_emb_mask, goal_emb_mask
 
 
 
@@ -409,6 +348,7 @@ class EncoderRNN(nn.Module):
 
     def forward(self, input, length, dependency_type):
         batch_size, seq_length = input.size(0), input.size(1)
+        total_length = length.max()
 
         transformed_input = self.transformer(input)
         max_length = length.max()
@@ -424,7 +364,7 @@ class EncoderRNN(nn.Module):
         self.rnn.flatten_parameters()
         packed = pack_padded_sequence(transformed_input, length.cpu(), batch_first=True, enforce_sorted=False)
         out, _ = self.rnn(packed)
-        padded = pad_packed_sequence(out, batch_first=True)
+        padded = pad_packed_sequence(out, batch_first=True, total_length=total_length)
         out_emb, out_len = padded
         out_emb = (out_emb[:, :, :out_emb.size(2) // 2] + out_emb[:, :, out_emb.size(2) // 2:]) / 2
 

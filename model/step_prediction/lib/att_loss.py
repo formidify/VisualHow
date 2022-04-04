@@ -12,7 +12,7 @@ def attention_loss(pred, gt, mask=None):
         pred = pred[mask == 1]
         gt = gt[mask == 1]
     loss = -(gt*torch.log(torch.clamp(pred,min=eps,max=1))).sum(-1)
-    return loss.sum() / batch
+    return loss.sum()
 
 # attention balanced BCE
 def attention_loss_bce(pred, gt, mask=None):

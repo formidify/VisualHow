@@ -35,7 +35,8 @@ class RawImageDataset(data.Dataset):
         self.data_split = data_split
         self.max_goal_length = opt.max_goal_length
 
-        loc_info = osp.join(data_path, "final_result_w_split_20028_step_question.json")
+        # loc_info = osp.join(data_path, "final_result_w_split_20028_step_question_start_with_0.json")
+        loc_info = osp.join(data_path, "final_result_w_split_20028_final_split.json")
         # get wikihow data information
         with open(loc_info) as f:
             data = json.load(f)
@@ -44,6 +45,8 @@ class RawImageDataset(data.Dataset):
             if value["split"] == data_split:
                 value["goal_id"] = key
                 self.data.append(value)
+
+        # self.vocabulary = Vocabulary.from_files("./data/vocabulary")
 
         # construct data structure
         self.captions = []
@@ -55,9 +58,16 @@ class RawImageDataset(data.Dataset):
         self.hit_ids = []
         self.caption_attention_index = []
         self.bbox_info = []
+        self.dependency_index_info = []
         self.topological_graph = []
         self.dependency_type = []
+        self.choice_image_ids = []
+        self.choice_step_indexes = []
+        self.choice_goal_ids = []
+        self.image_index_for_goal = []
+        self.hit_ids_to_index = {}
         # self.goals = []
+        counter = 0
         for value in tqdm(self.data):
             self.captions.append(value["step_list"])
             self.tasks.append(value["task_title"])
@@ -66,7 +76,10 @@ class RawImageDataset(data.Dataset):
             self.hit_ids.append(value["post_id"] + "_" + value["method_idx"])
             self.caption_attention_index.append(value["step_to_object_selected_index_position_result"])
             self.bbox_info.append(value["step_to_object_bbox_result"])
+            self.dependency_index_info.append(value["step_to_dependency_index_result"])
             self.dependency_type.append(value["dependency_type"])
+            self.hit_ids_to_index[value["post_id"] + "_" + value["method_idx"]] = counter
+            counter += 1
             if value["dependency_type"] == "others":
                 self.topological_graph.append(value["topological_graph"])
             elif value["dependency_type"] == "sequential":
@@ -76,16 +89,10 @@ class RawImageDataset(data.Dataset):
                 topological_index = [_ for _ in range(len(value["step_list"]))]
                 topological_graph = list(itertools.permutations(topological_index, len(topological_index)))
                 self.topological_graph.append(topological_graph)
-
-        if self.data_split != "train":
-            self.previous_step_index = []
-            self.current_step_index = []
-            self.mutliple_choice_candidates = []
-
-            for value in tqdm(self.data):
-                self.previous_step_index.append(value["previous_step_index"])
-                self.current_step_index.append(value["current_step_index"])
-                self.mutliple_choice_candidates.append(value["multiple_choice_candidates"])
+            self.choice_image_ids.append(value["evaluation_set"]["image_ids"])
+            self.choice_step_indexes.append(value["evaluation_set"]["seq_index"])
+            self.choice_goal_ids.append(value["evaluation_set"]["selected_goal"])
+            self.image_index_for_goal.append(value["evaluation_set"]["image_index_for_goal"])
 
         if "wikihow" in data_name:
             self.image_base = osp.join(data_path, 'images')
@@ -125,25 +132,28 @@ class RawImageDataset(data.Dataset):
 
         if data_split == 'dev':
             self.length = 5000
+        #
+        # if data_split == 'val':
+        #     self.length = 50
 
 
     def __getitem__(self, index):
-        if self.data_split == "train":
-            all_topological_graph = self.topological_graph[index]
-            selected_topological_graph = all_topological_graph[random.randint(0, len(all_topological_graph) - 1)]
-            current_step_index = random.randint(0, len(selected_topological_graph) - 1)
-            # current_step_index = 0
-            previous_steps_index = [selected_topological_graph[idx] for idx in range(current_step_index)]
-            current_step_index = selected_topological_graph[current_step_index]
-            mutliple_choice_candidates = [None]
-        else:
-            previous_steps_index = self.previous_step_index[index]
-            current_step_index = self.current_step_index[index]
-            mutliple_choice_candidates = self.mutliple_choice_candidates[index]
+        dependency_index_info = self.dependency_index_info[index]
+
+        choice_image_ids = self.choice_image_ids[index]
+        choice_step_indexes = self.choice_step_indexes[index]
+        choice_goal_ids = self.choice_goal_ids[index]
+        image_index_for_goal = self.image_index_for_goal[index]
 
         goal_index = self.hit_ids[index]
-        caption = self.captions[index]
-        cap_att_indexes = self.caption_attention_index[index]
+        caption = []
+        cap_att_indexes = []
+        for ii in range(len(image_index_for_goal)):
+            choice_goal_is = choice_goal_ids[ii]
+            image_index_for_goal_value = image_index_for_goal[ii]
+            caption.append(self.captions[self.hit_ids_to_index[choice_goal_is]][image_index_for_goal_value])
+            cap_att_indexes.append(self.caption_attention_index[self.hit_ids_to_index[choice_goal_is]][image_index_for_goal_value])
+
         targets, g_attentions, ng_attentions = [], [], []
         all_caption_attentions = []
         image_index = []
@@ -213,8 +223,13 @@ class RawImageDataset(data.Dataset):
             all_caption_attentions.append(all_caption_attention)
 
 
-        image_paths = self.image_paths[index]
-        bbox_info = self.bbox_info[index]
+        image_paths = []
+        bbox_info = []
+        for ii in range(len(image_index_for_goal)):
+            choice_goal_is = choice_goal_ids[ii]
+            image_index_for_goal_value = image_index_for_goal[ii]
+            image_paths.append(self.image_paths[self.hit_ids_to_index[choice_goal_is]][image_index_for_goal_value])
+            bbox_info.append(self.bbox_info[self.hit_ids_to_index[choice_goal_is]][image_index_for_goal_value])
         images = []
         g_att_maps = []
         att_maps = []
@@ -283,24 +298,6 @@ class RawImageDataset(data.Dataset):
             goal = process_goal(self.tokenizer, task_tokens, method_tokens, self.train)
             goals.append(goal)
 
-
-        dummy_image = images[0] * 0
-        for i in range(3):
-            dummy_image[i] += self.imagenet_mean[i]
-        dummy_caption, _, _ = \
-                process_caption(self.tokenizer, [], [], [], self.train)
-        dummy_goal = process_goal(self.tokenizer, task_tokens, method_tokens, self.train)
-
-
-        used_index = previous_steps_index + [current_step_index]
-        images = [dummy_image] + [images[_] for _ in used_index]
-        targets = [dummy_caption] + [targets[_] for _ in used_index]
-        all_caption_attentions = [all_caption_attentions[0][:dummy_caption.shape[0]] * 0] + [all_caption_attentions[_] for _ in used_index]
-        all_image_att_maps = [all_image_att_maps[0] * 0] + [all_image_att_maps[_] for _ in used_index]
-        goals = [dummy_goal] + [goals[_] for _ in used_index]
-        image_index = [-1] + [image_index[_] for _ in used_index]
-        image_ids = ["-1.jpg"] + [image_ids[_] for _ in used_index]
-
         dataset_idx = index
 
         dependency_type = self.dependency_type[index]
@@ -311,11 +308,80 @@ class RawImageDataset(data.Dataset):
         elif dependency_type == "others":
             dependency_type = 2
 
+        dummy_image = images[0] * 0
+        for i in range(3):
+            dummy_image[i] += self.imagenet_mean[i]
+        dummy_caption, _, _ = \
+                process_caption(self.tokenizer, [], [], [], self.train)
+        dummy_goal = process_goal(self.tokenizer, task_tokens, method_tokens, self.train)
+
+
+        images = [dummy_image] + images
+        targets = [dummy_caption] + targets
+        all_caption_attentions = [all_caption_attentions[0][:dummy_caption.shape[0]] * 0] + all_caption_attentions
+        all_image_att_maps = [all_image_att_maps[0] * 0] + all_image_att_maps
+        goals = [dummy_goal] + goals
+        image_index = [-1] + image_index
+        image_ids = ["-1.jpg"] + image_ids
+        choice_image_ids = ["-1.jpg"] + choice_image_ids
+        choice_step_indexes = [-10] + choice_step_indexes
+
         return images, targets, all_caption_attentions, all_image_att_maps, goals, dependency_type, \
-               image_index, image_ids, goal_index, mutliple_choice_candidates, dataset_idx
+               image_index, image_ids, goal_index, dataset_idx, dependency_index_info, choice_image_ids, choice_step_indexes
+
 
     def __len__(self):
         return self.length
+
+    def _process_only_image(self, im_in):
+        """
+            Converts an image into a network input, with pre-processing including re-scaling, padding, etc, and data
+        augmentation.
+        """
+        if len(im_in.shape) == 2:
+            im_in = im_in[:, :, np.newaxis]
+            im_in = np.concatenate((im_in, im_in, im_in), axis=2)
+
+        if 'detector' in self.backbone_source:
+            im_in = im_in[:, :, ::-1]
+        im = im_in.astype(np.float32, copy=True)
+
+        if self.train:
+            target_size = self.base_target_size * self.train_scale_rate
+        else:
+            target_size = self.base_target_size
+
+        # 2. Random crop when in training mode, elsewise just skip
+        if self.train:
+            crop_ratio = np.random.random() * 0.4 + 0.6
+            crop_size_h = int(im.shape[0] * crop_ratio)
+            crop_size_w = int(im.shape[1] * crop_ratio)
+            processed_im, x_start, y_start = self._crop(im, crop_size_h, crop_size_w, random=True)
+        else:
+            processed_im = im
+
+        # 3. Resize to the target resolution
+        im_shape = processed_im.shape
+        im_scale_x = float(target_size) / im_shape[1]
+        im_scale_y = float(target_size) / im_shape[0]
+        processed_im = cv2.resize(processed_im, None, None, fx=im_scale_x, fy=im_scale_y,
+                                  interpolation=cv2.INTER_LINEAR)
+
+        if self.train:
+            if np.random.random() > 0.5:
+                processed_im = self._hori_flip(processed_im)
+
+        # Normalization
+        if 'detector' in self.backbone_source:
+            processed_im = self._detector_norm(processed_im)
+        else:
+            processed_im = self._imagenet_norm(processed_im)
+
+        # _im_show(processed_im)
+        # _im_show(processed_im_g_att_in)
+        # _im_show(processed_im_att_in)
+
+        return processed_im
 
     def _process_image(self, im_in, im_g_att_in, im_att_in):
         """
@@ -433,7 +499,7 @@ class PrecompRegionDataset(data.Dataset):
         self.tokenizer = tokenizer
         self.max_goal_length = opt.max_goal_length
 
-        loc_info = osp.join(data_path, "final_result_w_split_15395.json")
+        loc_info = osp.join(data_path, "final_result_w_split_20028_TG.json")
         # get wikihow data information
         with open(loc_info) as f:
             data = json.load(f)
@@ -605,6 +671,43 @@ def process_caption(tokenizer, tokens, grounded_attention, non_grounded_attentio
     target_non_grounded_attention = torch.Tensor(target_non_grounded_attention)
     return target, target_grounded_attention, target_non_grounded_attention
 
+def process_only_caption(tokenizer, tokens, train=True):
+    output_tokens = []
+    deleted_idx = []
+
+    for i, token in enumerate(tokens):
+        sub_tokens = tokenizer.wordpiece_tokenizer.tokenize(token)
+        prob = random.random()
+
+        if prob < 0.20 and train:  # mask/remove the tokens only during training
+            prob /= 0.20
+
+            # 50% randomly change token to mask token
+            if prob < 0.5:
+                for sub_token in sub_tokens:
+                    output_tokens.append("[MASK]")
+            # 10% randomly change token to random token
+            elif prob < 0.6:
+                for sub_token in sub_tokens:
+                    output_tokens.append(random.choice(list(tokenizer.vocab.keys())))
+                    # -> rest 10% randomly keep current token
+            else:
+                for sub_token in sub_tokens:
+                    output_tokens.append(sub_token)
+                    deleted_idx.append(len(output_tokens) - 1)
+        else:
+            for sub_token in sub_tokens:
+                # no masking token (will be ignored by loss function later)
+                output_tokens.append(sub_token)
+
+    if len(deleted_idx) != 0:
+        output_tokens = [output_tokens[i] for i in range(len(output_tokens)) if i not in deleted_idx]
+
+    output_tokens = ['[CLS]'] + output_tokens + ['[SEP]']
+    target = tokenizer.convert_tokens_to_ids(output_tokens)
+    target = torch.Tensor(target)
+    return target
+
 def process_goal(tokenizer, task_tokens, method_tokens, train=True):
     task_output_tokens = []
     task_deleted_idx = []
@@ -687,23 +790,11 @@ def collate_fn(data):
     """
     # images, captions, goals, ids, goal_ids = zip(*data)
     # images, targets, goal_tokens, goal_sentences, image_index, goal_index = zip(*data)
-    images, targets, all_caption_attentions, all_image_att_maps, goals, dependency_type, \
-    image_index, image_ids, goal_index, mutliple_choice_candidates, dataset_idx = zip(*data)
-    # total_length = sum([len(_) for _ in images])
-    # while total_length > 36:
-    #     images = images[:-1]
-    #     targets = targets[:-1]
-    #     all_caption_attentions = all_caption_attentions[:-1]
-    #     all_image_att_maps = all_image_att_maps[:-1]
-    #     goals = goals[:-1]
-    #     dependency_type = dependency_type[:-1]
-    #     image_index = image_index[:-1]
-    #     image_ids = image_ids[:-1]
-    #     goal_index = goal_index[:-1]
-    #     mutliple_choice_candidates = mutliple_choice_candidates[:-1]
-    #     dataset_idx = dataset_idx[:-1]
-    #     total_length = sum([len(_) for _ in images])
+    # images, targets, all_caption_attentions, all_image_att_maps, goals, dependency_type, \
+    # image_index, image_ids, goal_index, mutliple_choice_candidates, dataset_idx = zip(*data)
 
+    images, targets, all_caption_attentions, all_image_att_maps, goals, dependency_type, \
+    image_index, image_ids, goal_index, dataset_idx, dependency_index_info, choice_image_ids, choice_step_indexes = zip(*data)
     # temporally we do not use region feature
     if len(images[0][0].shape) == 2:  # region feature
         # Sort a data list by caption length
@@ -762,7 +853,7 @@ def collate_fn(data):
         for id_value in range(len(images)):
             goal_ids.extend([goal_index[id_value]] * len(images[id_value]))
             batch_ids.extend([counter] * len(images[id_value]))
-            prediction_ids.extend([-10] + [-1] * (len(images[id_value]) - 2) + [counter])
+            prediction_ids.extend([-1] * (len(images[id_value]) - 1) + [counter])
             image_numbers.append(len(images[id_value]))
             counter += 1
 
@@ -810,9 +901,12 @@ def collate_fn(data):
 
         dependency_type = torch.tensor(dependency_type, dtype=torch.long)
 
+        # images, targets, all_caption_attentions, all_image_att_maps, goals, dependency_type, \
+        # image_index, image_ids, goal_index, dataset_idx, dependency_index_info, choice_image_ids, choice_step_indexes
+
         return images, image_numbers, cap_targets, cap_lengths, caption_map, image_map, \
-               goal_targets, goal_lengths, dependency_type, ids, image_ind, goal_ids, batch_ids, prediction_ids, \
-               dataset_idx, mutliple_choice_candidates
+               goal_targets, goal_lengths, dependency_type, ids, image_ind, goal_ids, batch_ids, \
+               dataset_idx, dependency_index_info, choice_step_indexes
 
 
 
@@ -846,9 +940,8 @@ def get_loader(data_path, data_name, data_split, tokenizer, opt, batch_size=100,
 def get_loaders(data_path, data_name, tokenizer, batch_size, workers, opt):
     train_loader = get_loader(data_path, data_name, 'train', tokenizer, opt,
                               batch_size, True, workers)
-    # val_loader = get_loader(data_path, data_name, 'val', tokenizer, opt,
-    #                         batch_size, False, workers, train=False)
-    val_loader = None
+    val_loader = get_loader(data_path, data_name, 'val', tokenizer, opt,
+                            batch_size, False, workers, train=False)
     return train_loader, val_loader
 
 
@@ -857,6 +950,10 @@ def get_train_loader(data_path, data_name, tokenizer, batch_size, workers, opt, 
                               batch_size, shuffle, workers)
     return train_loader
 
+def get_val_loaders(data_path, data_name, tokenizer, batch_size, workers, opt):
+    val_loader = get_loader(data_path, data_name, 'val', tokenizer, opt,
+                            batch_size//4, False, workers, train=False)
+    return val_loader
 
 def get_test_loader(split_name, data_name, tokenizer, batch_size, workers, opt):
     test_loader = get_loader(opt.data_path, data_name, split_name, tokenizer, opt,
