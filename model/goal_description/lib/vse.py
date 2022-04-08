@@ -203,12 +203,12 @@ class VSEModel(object):
         cap_emb = self.cap_enc(captions, cap_lengths)
 
         image_pooled_features, image_pool_weights, cap_pooled_features, cap_pool_weights, \
-        origin_image_pool_weights, image_pool_weight_masks = \
+        origin_image_pool_weights, image_pool_weight_masks, cap_emb_mask = \
             self.multimodal_enc(base_features, feat_lengths, feature_index,
                             cap_emb, cap_lengths)
 
         return image_pooled_features, image_pool_weights, cap_pooled_features, cap_pool_weights, \
-               origin_image_pool_weights, image_pool_weight_masks
+               origin_image_pool_weights, image_pool_weight_masks, cap_emb_mask
 
     def forward_loss(self, output_dict):
         """Compute the loss given pairs of image and caption embeddings
@@ -245,7 +245,8 @@ class VSEModel(object):
 
         # compute the embeddings
         img_emb, img_pool_weights, cap_emb, cap_pool_weights, \
-        origin_image_pool_weights, image_pool_weight_masks = self.forward_emb(images, captions, cap_lengths, image_lengths=image_lengths)
+        origin_image_pool_weights, image_pool_weight_masks, cap_emb_mask\
+            = self.forward_emb(images, captions, cap_lengths, image_lengths=image_lengths)
 
         # cat the feat
         cat_feat = torch.cat([img_emb, cap_emb], dim=1)
@@ -268,14 +269,18 @@ class VSEModel(object):
                 caption_map = caption_map.cuda()
             if self.opt.attention_loss == "ce":
                 # normalize
-                image_map = (image_map + 1e-10) / (image_map + 1e-10).sum(-1, keepdim=True).sum(-2, keepdim=True)
-                caption_map = (caption_map + 1e-10) / (caption_map + 1e-10).sum(-1, keepdim=True)
+                image_map[image_pool_weight_masks.view(-1, 1, 8, 8) == 0] = 0
+                image_map = image_map.view(image_map.shape[0], -1)
+                image_map[image_pool_weight_masks > 0] += 1e-10
+                image_map = image_map / image_map.sum(-1, keepdim=True)
+                caption_map[cap_emb_mask > 0] += 1e-10
+                caption_map = caption_map / caption_map.sum(-1, keepdim=True)
                 if not self.opt.no_image:
-                    v_att_loss = attention_loss(img_pool_weights, image_map)
+                    v_att_loss = attention_loss(origin_image_pool_weights, image_map, image_pool_weight_masks)
                 else:
                     v_att_loss = image_map.sum() * 0
                 if not self.opt.no_caption:
-                    l_att_loss = attention_loss(cap_pool_weights, caption_map)
+                    l_att_loss = attention_loss(cap_pool_weights, caption_map, cap_emb_mask)
                 else:
                     l_att_loss = caption_map.sum() * 0
             elif self.opt.attention_loss == "bce":
@@ -288,6 +293,8 @@ class VSEModel(object):
                 else:
                     l_att_loss = caption_map.sum() * 0
             att_loss = v_att_loss + l_att_loss
+            self.logger.update('V_Att_loss', v_att_loss.data.item(), output_dict["loss"].size(0))
+            self.logger.update('L_Att_loss', l_att_loss.data.item(), output_dict["loss"].size(0))
             self.logger.update('Att_loss', att_loss.data.item(), output_dict["loss"].size(0))
 
             loss = self.forward_loss(output_dict) + self.opt.attention_loss_weight * att_loss

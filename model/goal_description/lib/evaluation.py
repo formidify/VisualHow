@@ -121,7 +121,7 @@ def encode_data(model, data_loader, log_step=10, logging=logger.info, backbone=F
             img_emb, img_pool_weights, img_pool_masks, cap_emb, cap_pool_weights = model.forward_emb(images, cap_targets, cap_lengths, image_lengths=img_lengths)
         else:
             img_emb, img_pool_weights, cap_emb, cap_pool_weights, \
-            origin_image_pool_weights, image_pool_weight_masks = model.forward_emb(images, cap_targets, cap_lengths)
+            origin_image_pool_weights, image_pool_weight_masks, cap_emb_mask = model.forward_emb(images, cap_targets, cap_lengths)
 
         # cat the feat
         cat_feat = torch.cat([img_emb, cap_emb], dim=1)
@@ -344,8 +344,6 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False, save_path=Non
 def compute_sim(images, captions):
     similarities = np.matmul(images, np.matrix.transpose(captions))
     return similarities
-
-
 
 def i2t(npts, sims, return_ranks=False, mode='coco'):
     """

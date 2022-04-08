@@ -288,7 +288,7 @@ class MultiModalEncoder(nn.Module):
         image_pool_weight_masks = pool_weight_masks.view(-1, 64)
 
         return img_emb, image_pool_weights, cap_pooled_features, cap_pool_weights, \
-               origin_image_pool_weights, image_pool_weight_masks
+               origin_image_pool_weights, image_pool_weight_masks, cap_emb_mask
 
 
 

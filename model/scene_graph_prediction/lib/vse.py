@@ -205,14 +205,16 @@ class VSEModel(object):
         goal_emb = self.goal_enc(goal_targets, goal_lengths)
 
         image_pooled_features, image_pool_weights, cap_pooled_features, cap_pool_weights, \
-        goal_pooled_features, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks = \
+        goal_pooled_features, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks, \
+        cap_emb_mask, goal_emb_mask = \
             self.multimodal_enc(base_features, feat_lengths, feature_index,
                             cap_emb, cap_lengths,
                             goal_emb, goal_lengths)
 
 
         return image_pooled_features, image_pool_weights, cap_pooled_features, cap_pool_weights, \
-               goal_pooled_features, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks
+               goal_pooled_features, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks, \
+               cap_emb_mask, goal_emb_mask
 
     def forward_loss(self, pred_dependency, dependency_scores):
         """Compute the loss given pairs of image and caption embeddings
@@ -233,13 +235,12 @@ class VSEModel(object):
 
         # compute the embeddings
         img_emb, img_pool_weights, cap_emb, cap_pool_weights, \
-        goal_emb, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks =\
+        goal_emb, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks, cap_emb_mask, goal_emb_mas =\
             self.forward_emb(images, captions, cap_lengths, goals, goal_lengths, image_lengths=image_lengths)
 
         # cat the emb
         overall_emb = torch.cat((img_emb, cap_emb, goal_emb), dim=1)
         overall_goal_emb = torch.cat((goal_emb, goal_emb, goal_emb), dim=1)
-
         merge_emb_list = []
         dependency_scores_list = []
 
@@ -276,15 +277,23 @@ class VSEModel(object):
             if self.opt.attention_loss == "ce":
                 # normalize
                 image_map[image_pool_weight_masks.view(-1, 1, 8, 8) == 0] = 0
-                image_map = (image_map + 1e-10) / (image_map + 1e-10).sum(-1, keepdim=True).sum(-2, keepdim=True)
-                caption_map = (caption_map + 1e-10) / (caption_map + 1e-10).sum(-1, keepdim=True)
-                v_att_loss = attention_loss(img_pool_weights, image_map, image_pool_weight_masks)
-                l_att_loss = attention_loss(cap_pool_weights, caption_map)
+                image_map = image_map.view(image_map.shape[0], -1)
+                image_map[image_pool_weight_masks > 0] += 1e-10
+                image_map = image_map / image_map.sum(-1, keepdim=True)
+                caption_map[cap_emb_mask > 0] += 1e-10
+                caption_map = caption_map / caption_map.sum(-1, keepdim=True)
+                # image_map = (image_map + 1e-10) / (image_map + 1e-10).sum(-1, keepdim=True).sum(-2, keepdim=True)
+                # caption_map = (caption_map + 1e-10) / (caption_map + 1e-10).sum(-1, keepdim=True)
+                v_att_loss = attention_loss(origin_image_pool_weights, image_map, image_pool_weight_masks)
+                l_att_loss = attention_loss(cap_pool_weights, caption_map, cap_emb_mask)
             elif self.opt.attention_loss == "bce":
                 image_map[image_pool_weight_masks.view(-1, 1, 8, 8) == 0] = 0
                 v_att_loss = attention_loss_bce(img_pool_weights, image_map, image_pool_weight_masks)
-                l_att_loss = attention_loss_bce(cap_pool_weights, caption_map)
+                l_att_loss = attention_loss_bce(cap_pool_weights, caption_map, cap_emb_mask)
             att_loss = v_att_loss + l_att_loss
+            # self.logger.update('Att_loss', att_loss.data.item(), image_map.size(0))
+            self.logger.update('V_Att_loss', v_att_loss.data.item(), image_map.size(0))
+            self.logger.update('L_Att_loss', l_att_loss.data.item(), image_map.size(0))
             self.logger.update('Att_loss', att_loss.data.item(), image_map.size(0))
             loss = self.forward_loss(pred_dependency, dependency_scores) + self.opt.attention_loss_weight * att_loss
         else:

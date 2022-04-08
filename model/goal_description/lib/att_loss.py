@@ -3,22 +3,31 @@ import torch.nn.functional as F
 eps = 1e-15
 
 # attention CE
-def attention_loss(pred,gt):
+def attention_loss(pred, gt, mask=None):
     batch = len(pred)
     pred = pred.view(batch,-1)
     gt = gt.view(batch,-1)
+    if mask is not None:
+        mask = mask.view(batch,-1)
+        pred = pred[mask == 1]
+        gt = gt[mask == 1]
     loss = -(gt*torch.log(torch.clamp(pred,min=eps,max=1))).sum(-1)
-    return loss.mean()
+    return loss.sum()
 
 # attention balanced BCE
-def attention_loss_bce(pred,gt):
+def attention_loss_bce(pred, gt, mask=None):
     batch = len(pred)
     pred = pred.view(batch,-1)
     gt = gt.view(batch,-1)
+    if mask is not None:
+        mask = mask.view(batch,-1)
+        pred = pred[mask == 1]
+        gt = gt[mask == 1]
     neg_weight = gt.mean(-1,keepdim=True)
     pos_weight = 1-neg_weight
     loss = -(pos_weight*gt*torch.log(torch.clamp(pred,min=eps,max=1))+neg_weight*(1-gt)*torch.log(torch.clamp(1-pred,min=eps,max=1))).sum(-1)
-    return loss.mean()
+    return loss.sum() / batch
+
 
 
 # attention KLD

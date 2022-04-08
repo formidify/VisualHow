@@ -116,7 +116,7 @@ def encode_data(model, data_loader, log_step=10, logging=logger.info, backbone=F
             img_emb, cap_emb = model.forward_emb(images, captions, lengths, image_lengths=image_lengths)
         else:
             img_emb, img_pool_weights, cap_emb, cap_pool_weights, \
-            goal_emb, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks = \
+            goal_emb, goal_pool_weights, origin_image_pool_weights, image_pool_weight_masks, cap_emb_mask, goal_emb_mas =\
                 model.forward_emb(images, cap_targets, cap_lengths, goal_targets, goal_lengths, image_lengths=image_lengths)
 
             # cat the emb
@@ -261,7 +261,7 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False, save_path=Non
     checkpoint = torch.load(model_path)
     opt = checkpoint['opt']
     opt.workers = 5
-    opt.batch_size = 32
+    opt.batch_size = 4
 
     if not hasattr(opt, 'use_image'):
         opt.use_image = True
