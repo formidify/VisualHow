@@ -4,6 +4,17 @@
   <img src="Fig1.png" width="400" />
 </p>
 
+Reference
+------------------
+If you find the code useful in your research, please consider citing the paper.
+```text
+@InProceedings{jinhui:2022:visualhow,
+    author={Jinhui Yang and Xianyu Chen and Ming Jiang and Shi Chen and Louis Wang and Qi Zhao},
+    title = {{VisualHow}: Multimodal Problem Solving},
+    booktitle = {Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+    year = {2022}
+}
+```
 
 ## Dataset
 The dataset is available [here](https://drive.google.com/drive/folders/1yvXxQAbkU8x82lB618jiPEQQQ8sD_QG3?usp=sharing), it contains the following files:
