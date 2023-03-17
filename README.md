@@ -17,7 +17,7 @@ If you find the code useful in your research, please consider citing the paper.
 ```
 
 ## Dataset
-The dataset is available [here](https://drive.google.com/drive/folders/1yvXxQAbkU8x82lB618jiPEQQQ8sD_QG3?usp=sharing), it contains the following files:
+The dataset is available [here](https://drive.google.com/drive/folders/13Tm4y0ZBLqN_i1EGXDdyu7pVG2Uaq7O5?usp=sharing), it contains the following files:
 	
 * **wikiHow_data.json**: json file of all 20,028 problems with their corresponding WikiHow data
 
@@ -66,4 +66,5 @@ visualHow_data = []
 for line in open("visualHow_annotations.txt", "r"):
     visualHow_data.append(json.loads(line))
 ```
-
+## Update 3/17/23
+We have completely re-annotated over 600 VisualHow tasks that had incorrect bounding boxes, dependency annotations, and word annotations that were not up to standard, etc. We have also automatically corrected small issues for all data. Please let us know if there are more issues with the data. For other concerns or questions, feel free to open an issue on our GitHub page or email me @ yang7004 at umn.edu. Cheers and have fun!
