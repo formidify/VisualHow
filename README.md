@@ -4,6 +4,12 @@
   <img src="Fig1.png" width="400" />
 </p>
 
+## Update 4/6/2023 
+We have updated all the image urls, since for some tasks the WikiHow urls were pointing to incorrect images. 
+
+## Update 3/17/23
+We have completely re-annotated over 600 VisualHow tasks that had incorrect bounding boxes, dependency annotations, and word annotations that were not up to standard, etc. We have also automatically corrected small issues for all data. Please let us know if there are more issues with the dataset. For other questions or concerns, feel free to open an issue on our GitHub page or email me @ yang7004 at umn.edu. Cheers and have fun!
+
 Reference
 ------------------
 If you find the code useful in your research, please consider citing the paper.
@@ -67,5 +73,5 @@ visualHow_data = []
 for line in open("visualHow_annotations.txt", "r"):
     visualHow_data.append(json.loads(line))
 ```
-## Update 3/17/23
-We have completely re-annotated over 600 VisualHow tasks that had incorrect bounding boxes, dependency annotations, and word annotations that were not up to standard, etc. We have also automatically corrected small issues for all data. Please let us know if there are more issues with the dataset. For other questions or concerns, feel free to open an issue on our GitHub page or email me @ yang7004 at umn.edu. Cheers and have fun!
+
+This dataset is only for research purposes only. All the information in this dataset that is the intellectual property of WikiHow (e.g., text, image) is released under and protected by the CC-BY-NC-SA 3.0 license.
