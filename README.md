@@ -29,7 +29,7 @@ The dataset is available [here](https://drive.google.com/drive/folders/13Tm4y0ZB
     'url': URL of the unique wikiHow article,
     'article_title': title of the wikiHow article,
     'problem_title': title of the problem (which is part of the article),
-    'problem_index': index of the particular problem in terms of the article (str, e.g. 0),
+    'problem_idx': index of the particular problem in terms of the article (str, e.g. 0),
     'image_url': list of URLs for all images used in this problem,
     'step_list': list of textual step descriptions used in this problem
   }
@@ -43,7 +43,8 @@ The dataset is available [here](https://drive.google.com/drive/folders/13Tm4y0ZB
 [
   {
     'article_id': ID assigneed to each unique wikiHow article (str, e.g. 033313),
-    'problem_index': index of the particular problem in terms of the article,
+    'problem_idx': index of the particular problem in terms of the article,
+    'url': URL of the unique wikiHow article,
     'problem_title': title of the problem,
     'image_category': the annotated type of image of the problem - can be realistic, abstract, or mixed,
     'step_to_object_selected_result': a list of annotated phrases for this problem. For each step, there are 2 sublists - first one corresponds to multimodal attention, second one is for words without visual correspondence,
